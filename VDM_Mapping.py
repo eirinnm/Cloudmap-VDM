@@ -7,23 +7,28 @@ import csv
 import re
 import pprint
 from decimal import *
-from rpy import *
+#from rpy import *
+from rpy2.rpy_classic import *
+import traceback
+#import pdb
+
+set_default_mode(0)
 
 def main():
 	csv.field_size_limit(1000000000)
-
+	global options
 	parser = optparse.OptionParser()
 	parser.add_option('-v', '--sample_vcf', dest = 'sample_vcf', action = 'store', type = 'string', default = None, help = "Sample VCF from GATK Unified Genotyper")
 	parser.add_option('-l', '--loess_span', dest = 'loess_span', action = 'store', type = 'float', default = .1, help = "Loess span")
-	parser.add_option('-d', '--d_yaxis', dest = 'd_yaxis', action = 'store', type = 'float', default = 1, help = "y-axis upper limit for dot plot")  
-	parser.add_option('-y', '--h_yaxis', dest = 'h_yaxis', action = 'store', type = 'int', default = 0, help = "y-axis upper limit for histogram plot")   
-	parser.add_option('-c', '--points_color', dest = 'points_color', action = 'store', type = 'string', default = "gray27", help = "Color for data points") 
-	parser.add_option('-k', '--loess_color', dest = 'loess_color', action = 'store', type = 'string', default = "green2", help = "Color for loess regression line")        
+	parser.add_option('-d', '--d_yaxis', dest = 'd_yaxis', action = 'store', type = 'float', default = 1, help = "y-axis upper limit for dot plot")
+	parser.add_option('-y', '--h_yaxis', dest = 'h_yaxis', action = 'store', type = 'int', default = 0, help = "y-axis upper limit for histogram plot")
+	parser.add_option('-c', '--points_color', dest = 'points_color', action = 'store', type = 'string', default = "gray27", help = "Color for data points")
+	parser.add_option('-k', '--loess_color', dest = 'loess_color', action = 'store', type = 'string', default = "green2", help = "Color for loess regression line")
 	parser.add_option('-z', '--standardize', dest = 'standardize', default= 'true', help = "Standardize X-axis")
 	parser.add_option('-b', '--break_file', dest = 'break_file', action = 'store', type = 'string', default = 'C.elegans', help = "File defining the breaks per chromosome")
 	parser.add_option('-x', '--bin_size', dest = 'bin_size', action = 'store', type = 'int', default = 1000000, help = "Size of histogram bins, default is 1mb")
 	parser.add_option('-n', '--normalize_bins', dest = 'normalize_bins', default= 'true', help = "Normalize histograms")
-
+	parser.add_option('-a', '--allele_freq', dest = 'allele_freq', action = 'store', default= 'false', help = "Normalize histograms")
 	parser.add_option('-o', '--output', dest = 'output', action = 'store', type = 'string', default = None, help = "Output file name")
 	parser.add_option('-s', '--location_plot_output', dest = 'location_plot_output', action = 'store', type = 'string', default = "SNP_Mapping_Plot.pdf", help = "Output file name of SNP plots by chromosomal location")
 
@@ -32,10 +37,10 @@ def main():
 	vcf_info = parse_vcf(sample_vcf = options.sample_vcf)
 
 	output_vcf_info(output = options.output, vcf_info = vcf_info)
-	
+
 	#output plot with all ratios
 	rounded_bin_size = int(round((float(options.bin_size) / 1000000), 1) * 1000000)
-	
+
 	normalized_histogram_bins_per_mb = calculate_normalized_histogram_bins_per_xbase(vcf_info = vcf_info, xbase = rounded_bin_size, normalize_bins = options.normalize_bins)
 	max_y_hist_mb = normalized_histogram_bins_per_mb[max(normalized_histogram_bins_per_mb, key = lambda x: normalized_histogram_bins_per_mb.get(x) )]
 
@@ -57,7 +62,7 @@ def skip_headers(reader = None, i_file = None):
 	comment = 0
 	while reader.next()[0].startswith('#'):
 		comment = comment + 1
-	
+
 	# skip headers
 	i_file.seek(0)
 	for i in range(0, comment):
@@ -118,7 +123,7 @@ def output_vcf_info(output = None, vcf_info = None):
 
 	for location in location_sorted_vcf_info_keys:
 		alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
-		
+
 		location_info = location.split(':')
 		chromosome = location_info[0]
 		position = location_info[1]
@@ -128,76 +133,77 @@ def output_vcf_info(output = None, vcf_info = None):
 	o_file.close()
 
 def output_scatter_plots_by_location(location_plot_output = None, vcf_info = None, loess_span="", d_yaxis="", h_yaxis="", points_color="", loess_color="", standardize=None, normalized_hist_per_mb = None, normalized_hist_per_5kb = None, breaks = None, rounded_bin_size = 1000000, max_y_hist_overall = ""):
-	positions = {}
-	current_chr = ""
-	prev_chr = ""
+    positions = {}
+    current_chr = ""
+    prev_chr = ""
 
-	x_label = "Location (Mb)"
-	filtered_label = ''
+    x_label = "Location (Mb)"
+    filtered_label = ''
 
-	location_sorted_vcf_info_keys = sorted(vcf_info.keys(), cmp=location_comparer)
-	
-	break_unit = Decimal(rounded_bin_size) / Decimal(1000000)
-	max_breaks = max(breaks.values())
+    location_sorted_vcf_info_keys = sorted(vcf_info.keys(), cmp=location_comparer)
 
-	try:
-		r.pdf(location_plot_output, 8, 8)
-	
-		for location in location_sorted_vcf_info_keys:
-			current_chr = location.split(':')[0]
-			position = location.split(':')[1]
+    break_unit = Decimal(rounded_bin_size) / Decimal(1000000)
+    max_breaks = max(breaks.values())
 
-			alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
-		
-			if prev_chr != current_chr:
-				if prev_chr != "":
-					hist_dict_mb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_mb, chr = prev_chr)
-					hist_dict_5kb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_5kb, chr = prev_chr)
-					
-					if h_yaxis == 0:
-						plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = prev_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=max_y_hist_overall, points_color=points_color, loess_color=loess_color, breaks = breaks[prev_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
-					else:
-						plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = prev_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=h_yaxis, points_color=points_color, loess_color=loess_color, breaks = breaks[prev_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
+    try:
+        r.pdf(location_plot_output, 8, 8)
+        for location in location_sorted_vcf_info_keys:
+            current_chr = location.split(':')[0]
+            position = location.split(':')[1]
 
-				prev_chr = current_chr
-				positions = {}
-		
-			positions[position] = ratio
+            alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
 
-		hist_dict_mb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_mb, chr = current_chr)
-		hist_dict_5kb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_5kb, chr = current_chr)
-			
-		if h_yaxis == 0:					
-			plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = current_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=max_y_hist_overall, points_color=points_color, loess_color=loess_color, breaks = breaks[current_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
-		else:
-			plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = current_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=h_yaxis, points_color=points_color, loess_color=loess_color, breaks = breaks[current_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
+            if prev_chr != current_chr:
+                if prev_chr != "": ## finish off the previous chr plot
+                    #print current_chr, current_chr in breaks
+                    hist_dict_mb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_mb, chr = prev_chr)
+                    hist_dict_5kb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_5kb, chr = prev_chr)
 
-		r.dev_off()
-		
-	except Exception as inst:
-        	print inst
-        	print "There was an error creating the location plot pdf... Please try again"
+                    if h_yaxis == 0:
+                        plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = prev_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=max_y_hist_overall, points_color=points_color, loess_color=loess_color, breaks = breaks[prev_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
+                    else:
+                        plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = prev_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=h_yaxis, points_color=points_color, loess_color=loess_color, breaks = breaks[prev_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
+                if current_chr not in breaks:
+                    break ##stop iteration when we encounter a non-genomic chr
+                prev_chr = current_chr
+                positions = {}
+
+            positions[position] = ratio
+        ## finish the current chr
+#        hist_dict_mb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_mb, chr = current_chr)
+#        hist_dict_5kb = get_hist_dict_by_chr(normalized_hist_per_xbase = normalized_hist_per_5kb, chr = current_chr)
+#
+#        if h_yaxis == 0:
+#            plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = current_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=max_y_hist_overall, points_color=points_color, loess_color=loess_color, breaks = breaks[current_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
+#        else:
+#            plot_data(chr_dict = positions, hist_dict_mb = hist_dict_mb, hist_dict_5kb = hist_dict_5kb, chr = current_chr + filtered_label, x_label = "Location (Mb)", divide_position = True, draw_secondary_grid_lines = True, loess_span=loess_span, d_yaxis=d_yaxis, h_yaxis=h_yaxis, points_color=points_color, loess_color=loess_color, breaks = breaks[current_chr], standardize=standardize, max_breaks = max_breaks, break_unit = break_unit)
+
+        r.dev_off()
+
+    except Exception as inst:
+        print traceback.format_exc()
+        print "There was an error creating the location plot pdf... Please try again"
 
 def get_hist_dict_by_chr(normalized_hist_per_xbase = None, chr = ''):
-	hist_dict = {}	
+	hist_dict = {}
 
 	for location in normalized_hist_per_xbase:
-		chromosome = location.split(':')[0]		
+		chromosome = location.split(':')[0]
 		if chromosome == chr:
 			position = int(location.split(':')[1])
 			hist_dict[position] = normalized_hist_per_xbase[location]
-	
+
 	max_location = max(hist_dict.keys(), key=int)
 	for i in range(1, max_location):
 		if i not in hist_dict:
-			hist_dict[i] = 0	
-	
-	return hist_dict	
+			hist_dict[i] = 0
+
+	return hist_dict
 
 def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr = "", x_label = "", divide_position = False, draw_secondary_grid_lines = False, loess_span=None, d_yaxis=None, h_yaxis=None, points_color="", loess_color="", breaks = None, standardize= None, max_breaks = 1, break_unit = 1):
 	ratios = "c("
 	positions = "c("
-	
+
 	for position in chr_dict:
 		ratio = chr_dict[position]
 		if divide_position:
@@ -221,7 +227,7 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
 	hist_mb_values = "c("
     	for position in sorted(hist_dict_mb):
 		hist_mb_values = hist_mb_values + str(hist_dict_mb[position]) + ", "
-	
+
 	if len(hist_mb_values) == 2:
 		hist_mb_values = hist_mb_values + ")"
 	else:
@@ -229,7 +235,7 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
 
 	hist_5kb_values = "c("
 	for position in sorted(hist_dict_5kb):
-		hist_5kb_values = hist_5kb_values + str(hist_dict_5kb[position]) + ", "	
+		hist_5kb_values = hist_5kb_values + str(hist_dict_5kb[position]) + ", "
 
 	if len(hist_5kb_values) == 2:
 		hist_5kb_values = hist_5kb_values + ")"
@@ -241,11 +247,11 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
 
 
 	max_break_str = str(max_breaks)
-	break_unit_str = str(Decimal(break_unit)) 	
+	break_unit_str = str(Decimal(break_unit))
 	half_break_unit_str = str(Decimal(break_unit) / Decimal(2))
 	break_penta_unit_str = str(Decimal(break_unit) * Decimal(5))
 
-	if (standardize=='true'):  
+	if (standardize=='true'):
 		r("plot(x, y, ,cex=0.60, xlim=c(0," + max_break_str + "), main='LG " + chr + " (Variant Discovery Mapping)', xlab= '" + x_label + "', ylim = c(0, %f " %d_yaxis + "), ylab='Ratios of variant reads/total reads (at variant positions)', pch=10, col='"+ points_color +"')")
 		r("lines(loess.smooth(x, y, span = %f "%loess_span + "), lwd=5, col='"+ loess_color +"')")
 		r("axis(1, at=seq(0, " + max_break_str + ", by=" + break_unit_str + "), labels=FALSE, tcl=-0.5)")
@@ -253,9 +259,9 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
 		r("axis(2, at=seq(floor(min(y)), 1, by=0.1), labels=FALSE, tcl=-0.2)")
 	elif (standardize=='false'):
 		r("plot(x, y, cex=0.60, main='LG " + chr + " (Variant Discovery Mapping)', xlab= '" + x_label + "', ylim = c(0, %f " %d_yaxis + "), ylab='Ratios of variant reads/total reads (at variant positions)', pch=10, col='"+ points_color +"')")
-		r("lines(loess.smooth(x, y, span = %f "%loess_span + "), lwd=5, col='"+ loess_color +"')")    
+		r("lines(loess.smooth(x, y, span = %f "%loess_span + "), lwd=5, col='"+ loess_color +"')")
 		r("axis(1, at=seq(0, as.integer( ' " + str(breaks) + " '), by= " + break_unit_str + "), labels=FALSE, tcl=-0.5)")
-		r("axis(1, at=seq(0, as.integer( ' " + str(breaks) + " '), by= " + half_break_unit_str + "), labels=FALSE, tcl=-0.25)")	
+		r("axis(1, at=seq(0, as.integer( ' " + str(breaks) + " '), by= " + half_break_unit_str + "), labels=FALSE, tcl=-0.25)")
 		r("axis(2, at=seq(floor(min(y)), 1, by=0.1), labels=FALSE, tcl=-0.2)")
 
 	if draw_secondary_grid_lines:
@@ -265,19 +271,19 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
 
 	if (standardize=='true'):
 		r("barplot(xz, xlim=c(0, " + max_break_str + "), ylim = c(0, " + str(h_yaxis) + "), yaxp=c(0, " + str(h_yaxis) + ", 1), space = 0, col='darkgray', width = " + break_unit_str + ", xlab='Location (Mb)', ylab='Normalized frequency of pure parental alleles ', main='LG " + chr + " (Variant Discovery Mapping)')")
-		r("barplot(yz, space = 0, add=TRUE, width = " + half_break_unit_str + ", col='green2')")	
+		r("barplot(yz, space = 0, add=TRUE, width = " + half_break_unit_str + ", col='green2')")
 		r("axis(1, hadj = 1, at=seq(0, " + max_break_str + ", by= " + break_unit_str + "), labels=FALSE, tcl=-0.5)")
 		r("axis(1, at=seq(0, " + max_break_str + ", by= " + break_penta_unit_str + "), labels=TRUE, tcl=-0.5)")
 		r("axis(1, at=seq(0, " + max_break_str + ", by= " + half_break_unit_str + "), labels=FALSE, tcl=-0.25)")
 	elif (standardize=='false'):
-		r("barplot(xz, ylim = c(0, " + str(h_yaxis) + "), yaxp=c(0, " + str(h_yaxis) + ", 1), space = 0, col='darkgray', width = 1, xlab='Location (Mb)', ylab='Normalized frequency of pure parental alleles ', main='LG " + chr + " (Variant Discovery Mapping)')")	
-		r("barplot(yz, space = 0, add=TRUE, width = 0.5, col='green2')")	
+		r("barplot(xz, ylim = c(0, " + str(h_yaxis) + "), yaxp=c(0, " + str(h_yaxis) + ", 1), space = 0, col='darkgray', width = 1, xlab='Location (Mb)', ylab='Normalized frequency of pure parental alleles ', main='LG " + chr + " (Variant Discovery Mapping)')")
+		r("barplot(yz, space = 0, add=TRUE, width = 0.5, col='green2')")
 		r("axis(1, at=seq(0, as.integer( ' " + str(breaks) + " '), by= " + break_unit_str + "), labels=FALSE, tcl=-0.5)")
 		r("axis(1, at=seq(0, as.integer( ' " + str(breaks) + " '), by= " + break_penta_unit_str + "), labels=TRUE, tcl=-0.5)")
 		r("axis(1, at=seq(0, as.integer( ' " + str(breaks) + " '), by= " + half_break_unit_str + "), labels=FALSE, tcl=-0.25)")
 
 
-		
+
 def calculate_normalized_histogram_bins_per_xbase(vcf_info = None, xbase = 1000000, normalize_bins = None):
 	normalized_histogram_bins_per_xbase = {}
 
@@ -292,15 +298,15 @@ def calculate_normalized_histogram_bins_per_xbase(vcf_info = None, xbase = 10000
 
 		one_ratio_snp_count = 0
 		if location in one_ratio_snp_count_per_xbase:
-			one_ratio_snp_count = one_ratio_snp_count_per_xbase[location]	
+			one_ratio_snp_count = one_ratio_snp_count_per_xbase[location]
 
-		if normalize_bins == 'true':							
+		if normalize_bins == 'true':
 			if one_ratio_snp_count == 0:
 				normalized_histogram_bins_per_xbase[location] = 0
 			elif one_ratio_snp_count == ref_snp_count:
-				normalized_histogram_bins_per_xbase[location] = (Decimal(one_ratio_snp_count**2) * Decimal(mean_one_ratio_snp_count))					
+				normalized_histogram_bins_per_xbase[location] = (Decimal(one_ratio_snp_count**2) * Decimal(mean_one_ratio_snp_count))
 			else:
-				normalized_histogram_bins_per_xbase[location] = (Decimal(one_ratio_snp_count**2) / (Decimal(ref_snp_count)-Decimal(one_ratio_snp_count))) * Decimal(mean_one_ratio_snp_count)					
+				normalized_histogram_bins_per_xbase[location] = (Decimal(one_ratio_snp_count**2) / (Decimal(ref_snp_count)-Decimal(one_ratio_snp_count))) * Decimal(mean_one_ratio_snp_count)
 		else:
 			normalized_histogram_bins_per_xbase[location] = one_ratio_snp_count
 
@@ -332,22 +338,22 @@ def get_ref_snp_count_per_xbase(vcf_info = None, xbase = 1000000):
 
 def get_mean_one_ratio_snp_count_per_chromosome(vcf_info, xbase = 1000000):
 	sample_snp_count_per_xbase = {}
-	
+
 	for location in vcf_info:
 		alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
-			
+
 		location_info = location.split(':')
 		chromosome = location_info[0]
 		position = location_info[1]
 		xbase_position = (int(position) / xbase) + 1
 		xbase_location = chromosome + ":" + str(xbase_position)
-		
+
 		if ratio == 1:
 			if xbase_location in sample_snp_count_per_xbase:
 				sample_snp_count_per_xbase[xbase_location] = sample_snp_count_per_xbase[xbase_location] + 1
 			else:
 				sample_snp_count_per_xbase[xbase_location] = 1
-		
+
 		elif ratio != 1 and xbase_location not in sample_snp_count_per_xbase:
 			sample_snp_count_per_xbase[xbase_location] = 0
 
@@ -374,13 +380,13 @@ def get_one_ratio_snp_count_per_xbase(vcf_info = None, xbase = 1000000):
 
 	for location in vcf_info:
 		alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
-			
+
 		location_info = location.split(':')
 		chromosome = location_info[0]
 		position = location_info[1]
 		xbase_position = (int(position) / xbase) + 1
 		xbase_location = chromosome + ":" + str(xbase_position)
-		
+
 		if ratio == 1:
 			if xbase_location in one_ratio_snp_count_per_xbase:
 				one_ratio_snp_count_per_xbase[xbase_location] = one_ratio_snp_count_per_xbase[xbase_location] + 1
@@ -395,15 +401,17 @@ def get_one_ratio_snp_count_per_xbase(vcf_info = None, xbase = 1000000):
 
 def parse_vcf(sample_vcf = None):
 	i_file = open(sample_vcf, 'rU')
-	reader = csv.reader(i_file, delimiter = '\t', quoting = csv.QUOTE_NONE)	
+	reader = csv.reader(i_file, delimiter = '\t', quoting = csv.QUOTE_NONE)
 
 	skip_headers(reader = reader, i_file = i_file)
 	vcf_info = {}
 
 	for row in reader:
 		chromosome = row[0].upper()
-		chromosome = re.sub("CHROMOSOME_", "", chromosome, flags = re.IGNORECASE)
-		chromosome = re.sub("chr", "", chromosome, flags = re.IGNORECASE)
+		chromosome = chromosome.replace("CHROMOSOME_","")
+		chromosome = chromosome.replace("CHR","")
+		#chromosome = re.sub("CHROMOSOME_", "", chromosome, flags = re.IGNORECASE)
+		#chromosome = re.sub("chr", "", chromosome, flags = re.IGNORECASE)
 
 
 		if chromosome != 'MTDNA':
@@ -411,26 +419,36 @@ def parse_vcf(sample_vcf = None):
 			#ref_allele = row[2]
 			#read_depth = row[3]
 			#read_bases = row[4]
+			### Get allele frquency data
+			if options.allele_freq == 'true':
+	 			vcf_info_fields = row[7].split(';')
+				allele_freq_field = vcf_info_fields[1]
+				if allele_freq.startswith('AF'):
+					allele_freq = allele_freq_field[3:]
+					ratio = float(allele_freq)
+					vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
+				else:
+					raise ValueError("Expected AF field, instead got %s" % allele_freq_field)
+			else:
+				vcf_format_info = row[8].split(":")
+				vcf_allele_freq_data = row[9]
 
-			vcf_format_info = row[8].split(":")
-			vcf_allele_freq_data = row[9] 
-			
-			read_depth_data_index = vcf_format_info.index("DP")
-			read_depth = vcf_allele_freq_data.split(":")[read_depth_data_index]
+				read_depth_data_index = vcf_format_info.index("DP")
+				read_depth = vcf_allele_freq_data.split(":")[read_depth_data_index]
 
-			ref_and_alt_counts_data_index = vcf_format_info.index("AD")
-			ref_and_alt_counts = vcf_allele_freq_data.split(":")[ref_and_alt_counts_data_index]	
-			ref_allele_count = ref_and_alt_counts.split(",")[0]
-			alt_allele_count = ref_and_alt_counts.split(",")[1]
+				ref_and_alt_counts_data_index = vcf_format_info.index("AD")
+				ref_and_alt_counts = vcf_allele_freq_data.split(":")[ref_and_alt_counts_data_index]
+				ref_allele_count = ref_and_alt_counts.split(",")[0]
+				alt_allele_count = ref_and_alt_counts.split(",")[1]
 
-			location = chromosome + ":" + position
-	
-			if Decimal(read_depth!=0):		
-				getcontext().prec = 6	
-				ratio = Decimal(alt_allele_count) / Decimal(read_depth)
-	
-				vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
-		
+				location = chromosome + ":" + position
+
+				if Decimal(read_depth!=0):
+					getcontext().prec = 6
+					ratio = Decimal(alt_allele_count) / Decimal(read_depth)
+
+					vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
+
 				#debug line
 				#print chromosome, position, read_depth, ref_allele_count, alt_allele_count, ratio, id
 
