@@ -34,7 +34,9 @@ def main():
 
 	(options, args) = parser.parse_args()
 
-	vcf_info = parse_vcf(sample_vcf = options.sample_vcf)
+	break_dict = parse_breaks(break_file = options.break_file)
+	## parse the file, only looking at SNPS in chromosomes (break_dict keys)
+	vcf_info = parse_vcf(sample_vcf = options.sample_vcf, whitelist_chrs=set(break_dict.keys()))
 
 	output_vcf_info(output = options.output, vcf_info = vcf_info)
 
@@ -50,7 +52,6 @@ def main():
 	max_y_hist_overall = myround(max(max_y_hist_mb, max_y_hist_5kb) + int(round(round(max(max_y_hist_mb, max_y_hist_5kb)) * .1)))
 
 
-	break_dict = parse_breaks(break_file = options.break_file)
 
 	output_scatter_plots_by_location(location_plot_output = options.location_plot_output, vcf_info = vcf_info, loess_span=options.loess_span, d_yaxis=options.d_yaxis, h_yaxis=options.h_yaxis, points_color=options.points_color, loess_color=options.loess_color, standardize =options.standardize, normalized_hist_per_mb = normalized_histogram_bins_per_mb, normalized_hist_per_5kb = normalized_histogram_bins_per_5kb, breaks = break_dict, rounded_bin_size = rounded_bin_size, max_y_hist_overall = max_y_hist_overall)
 
@@ -399,22 +400,21 @@ def get_one_ratio_snp_count_per_xbase(vcf_info = None, xbase = 1000000):
 	return one_ratio_snp_count_per_xbase
 
 
-def parse_vcf(sample_vcf = None):
+def parse_vcf(sample_vcf = None, whitelist_chrs=None):
 	i_file = open(sample_vcf, 'rU')
 	reader = csv.reader(i_file, delimiter = '\t', quoting = csv.QUOTE_NONE)
 
 	skip_headers(reader = reader, i_file = i_file)
 	vcf_info = {}
-
+	SNP_counter = 0
+	Triallelic_counter = 0
 	for row in reader:
 		chromosome = row[0].upper()
 		chromosome = chromosome.replace("CHROMOSOME_","")
 		chromosome = chromosome.replace("CHR","")
 		#chromosome = re.sub("CHROMOSOME_", "", chromosome, flags = re.IGNORECASE)
 		#chromosome = re.sub("chr", "", chromosome, flags = re.IGNORECASE)
-
-
-		if chromosome != 'MTDNA':
+		if (chromosome in whitelist_chrs) or (not whitelist_chrs):
 			position = row[1]
 			#ref_allele = row[2]
 			#read_depth = row[3]
@@ -423,37 +423,37 @@ def parse_vcf(sample_vcf = None):
 			if options.allele_freq == 'true':
 	 			vcf_info_fields = row[7].split(';')
 				allele_freq_field = vcf_info_fields[1]
-				if allele_freq.startswith('AF'):
+				if allele_freq_field.startswith('AF'):
 					allele_freq = allele_freq_field[3:]
-					ratio = float(allele_freq)
-					vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
+					try:
+						ratio = float(allele_freq)
+						SNP_counter+=1
+					except ValueError:
+						Triallelic_counter+=1
+						continue #ignore rows that can't be converted, like tri-allelic
+					#vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
 				else:
 					raise ValueError("Expected AF field, instead got %s" % allele_freq_field)
-			else:
-				vcf_format_info = row[8].split(":")
-				vcf_allele_freq_data = row[9]
+			vcf_format_info = row[8].split(":")
+			vcf_allele_freq_data = row[9]
 
-				read_depth_data_index = vcf_format_info.index("DP")
-				read_depth = vcf_allele_freq_data.split(":")[read_depth_data_index]
+			read_depth_data_index = vcf_format_info.index("DP")
+			read_depth = vcf_allele_freq_data.split(":")[read_depth_data_index]
 
-				ref_and_alt_counts_data_index = vcf_format_info.index("AD")
-				ref_and_alt_counts = vcf_allele_freq_data.split(":")[ref_and_alt_counts_data_index]
-				ref_allele_count = ref_and_alt_counts.split(",")[0]
-				alt_allele_count = ref_and_alt_counts.split(",")[1]
+			ref_and_alt_counts_data_index = vcf_format_info.index("AD")
+			ref_and_alt_counts = vcf_allele_freq_data.split(":")[ref_and_alt_counts_data_index]
+			ref_allele_count = ref_and_alt_counts.split(",")[0]
+			alt_allele_count = ref_and_alt_counts.split(",")[1]
 
-				location = chromosome + ":" + position
-
+			location = chromosome + ":" + position
+			if options.allele_freq <> 'true':
 				if Decimal(read_depth!=0):
 					getcontext().prec = 6
 					ratio = Decimal(alt_allele_count) / Decimal(read_depth)
 
-					vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
-
-				#debug line
-				#print chromosome, position, read_depth, ref_allele_count, alt_allele_count, ratio, id
-
+			vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
+	print SNP_counter, "SNPs processed and", Triallelic_counter, "triallelic SNPs ignored"
 	i_file.close()
-
 	return vcf_info
 
 def parse_read_bases(read_bases = None, alt_allele = None):
