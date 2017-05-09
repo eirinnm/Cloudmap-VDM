@@ -1,3 +1,6 @@
+# VCF files
+*.vcf
+
 # Windows image file caches
 Thumbs.db
 ehthumbs.db
