@@ -1,5 +1,7 @@
 # VCF files
 *.vcf
+*.pdf
+output.txt
 
 # Windows image file caches
 Thumbs.db
