@@ -221,23 +221,26 @@ def get_hist_dict_by_chr(normalized_hist_per_xbase = None, chr = ''):
     return hist_dict
 
 def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr = "", x_label = "", divide_position = False, draw_secondary_grid_lines = False, loess_span=None, d_yaxis=None, h_yaxis=None, points_color="", loess_color="", breaks = None, standardize= None, max_breaks = 1, break_unit = 1):
-    ratios = "c("
-    positions = "c("
-    for position in chr_dict:
-        ratio = chr_dict[position]
-        if divide_position:
-            position = float(position) / 1000000.0
-        positions = positions + str(position) + ", "
-        ratios = ratios + str(ratio) + ", "
-    if len(ratios) == 2:
-            ratios = ratios + ")"
-    else:
-            ratios = ratios[0:len(ratios) - 2] + ")"
-
-    if len(positions) == 2:
-            positions = positions + ")"
-    else:
-            positions = positions[0:len(positions) - 2] + ")"
+#    ratios = "c("
+#    positions = "c("
+#    for position in chr_dict:
+#        ratio = chr_dict[position]
+#        if divide_position:
+#            position = float(position) / 1000000.0
+#        positions = positions + str(position) + ", "
+#        ratios = ratios + str(ratio) + ", "
+#    if len(ratios) == 2:
+#            ratios = ratios + ")"
+#    else:
+#            ratios = ratios[0:len(ratios) - 2] + ")"
+#
+#    if len(positions) == 2:
+#            positions = positions + ")"
+#    else:
+#            positions = positions[0:len(positions) - 2] + ")"
+    pos_ratio_list = [(float(position) / 1000000.0,ratio) for position, ratio in chr_dict.iteritems()]
+    ratios = "c(" + ", ".join(str(ratio) for pos, ratio in pos_ratio_list) + ")"
+    positions = "c(" + ", ".join(str(pos) for pos, ratio in pos_ratio_list) + ")"
     r("x <- " + positions)
     r("y <- " + ratios)
 
@@ -465,8 +468,8 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
 
             location = chromosome + ":" + position
             vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
-    print SNP_counter, "SNPs processed and", Triallelic_counter, "triallelic SNPs ignored"
     print RO_counter, "SNPs were parsed using RO/AO fields and", AD_counter, "were parsed using AD field."
+    print Triallelic_counter, "triallelic SNPs ignored."
     i_file.close()
     return vcf_info
 
