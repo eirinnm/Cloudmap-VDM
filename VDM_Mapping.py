@@ -244,7 +244,7 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
     hist_mb_values = "c("
     for position in sorted(hist_dict_mb):
         hist_mb_values = hist_mb_values + str(hist_dict_mb[position]) + ", "
-    hist_mb_values = "c("+", ".join(str(pos) for pos in hist_dict_mb) + ")"
+    #hist_mb_values = "c("+", ".join(str(pos) for pos in hist_dict_mb) + ")"
     if len(hist_mb_values) == 2:
         hist_mb_values = hist_mb_values + ")"
     else:
