@@ -461,7 +461,10 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
                     continue
 
             read_depth = int(vcf_allele_data_bits[vcf_format_info.index("DP")])
-            ratio = 1.0 * alt_allele_count / (ref_allele_count+alt_allele_count) ## python 2 float division
+            if (ref_allele_count+alt_allele_count>0):
+                ratio = 1.0 * alt_allele_count / (ref_allele_count+alt_allele_count) ## python 2 float division
+            else:
+                continue
 
             location = chromosome + ":" + position
             vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
