@@ -460,13 +460,14 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
                     Triallelic_counter+=1
                     continue
 
+            location = chromosome + ":" + position
             read_depth = int(vcf_allele_data_bits[vcf_format_info.index("DP")])
             if (ref_allele_count+alt_allele_count>0):
                 ratio = 1.0 * alt_allele_count / (ref_allele_count+alt_allele_count) ## python 2 float division
             else:
+                print "Skipping zero-depth SNP at", location
                 continue
 
-            location = chromosome + ":" + position
             vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
     print SNP_counter, "SNPs processed and", Triallelic_counter, "triallelic SNPs ignored"
     print RO_counter, "SNPs were parsed using RO/AO fields and", AD_counter, "were parsed using AD field."
