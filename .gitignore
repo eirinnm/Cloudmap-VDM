@@ -2,6 +2,7 @@
 *.vcf
 *.pdf
 output.txt
+*.txt
 
 # Windows image file caches
 Thumbs.db

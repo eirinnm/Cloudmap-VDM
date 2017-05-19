@@ -123,18 +123,18 @@ def output_vcf_info(output = None, vcf_info = None):
     o_file = open(output, 'wb')
     writer = csv.writer(o_file, delimiter = '\t')
 
-    writer.writerow(["#Chr\t", "Pos\t", "Alt Count\t", "Ref Count\t", "Read Depth\t", "Ratio\t"])
+    writer.writerow(["#Chr", "Pos", "Alt Count", "Ref Count", "Mut Depth", "Mut Ratio", "Sib Depth", "Sib Ratio"])
 
     location_sorted_vcf_info_keys = sorted(vcf_info.keys(), cmp=location_comparer)
 
     for location in location_sorted_vcf_info_keys:
-        alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
+        alt_allele_count, ref_allele_count, read_depth, ratio, sib_depth, sib_ratio = vcf_info[location]
 
         location_info = location.split(':')
         chromosome = location_info[0]
         position = location_info[1]
 
-        writer.writerow([chromosome, position, alt_allele_count, ref_allele_count, read_depth, ratio])
+        writer.writerow([chromosome, position, alt_allele_count, ref_allele_count, read_depth, ratio, sib_depth, sib_ratio])
 
     o_file.close()
 
@@ -165,7 +165,7 @@ def output_scatter_plots_by_location(location_plot_output, vcf_info, h_yaxis, ma
             current_chr = location.split(':')[0]
             position = location.split(':')[1]
 
-            alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
+            alt_allele_count, ref_allele_count, read_depth, ratio, sib_depth, sib_ratio = vcf_info[location]
 
             if prev_chr != current_chr:
                 if prev_chr != "": ## finish off the previous chr plot
@@ -363,7 +363,7 @@ def get_mean_one_ratio_snp_count_per_chromosome(vcf_info, xbase = 1000000):
     sample_snp_count_per_xbase = {}
 
     for location in vcf_info:
-        alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
+        alt_allele_count, ref_allele_count, read_depth, ratio, sib_depth, sib_ratio = vcf_info[location]
 
         location_info = location.split(':')
         chromosome = location_info[0]
@@ -402,7 +402,7 @@ def get_one_ratio_snp_count_per_xbase(vcf_info = None, xbase = 1000000):
     one_ratio_snp_count_per_xbase = {}
 
     for location in vcf_info:
-        alt_allele_count, ref_allele_count, read_depth, ratio = vcf_info[location]
+        alt_allele_count, ref_allele_count, read_depth, ratio, sib_depth, sib_ratio = vcf_info[location]
 
         location_info = location.split(':')
         chromosome = location_info[0]
@@ -472,18 +472,21 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
                     mut_ratio = 1.0 * ao / (ro+ao)
                     mut_depth = int(genotype_data[vcf_format_info.index('DP')])
                     if sibindex:
-                        genotype_data = row[mutindex].split(':')
+                        genotype_data = row[sibindex].split(':')
                         ro = int(genotype_data[vcf_format_info.index('RO')])
                         ao = int(genotype_data[vcf_format_info.index('AO')])
                         sib_ratio = 1.0 * ao / (ro+ao)
                         sib_depth = int(genotype_data[vcf_format_info.index('DP')])
+                    else:
+                        sib_ratio = 0
+                        sib_depth = 0
                         
                 except ValueError:
                     Triallelic_counter+=1
                     continue #ignore rows that can't be converted, like tri-allelic
         
                 location = chromosome + ":" + position
-                vcf_info[location] = (ao, ro, mut_depth, mut_ratio)
+                vcf_info[location] = (ao, ro, mut_depth, mut_ratio, sib_depth, sib_ratio)
                 #import pdb; pdb.set_trace()
             except:
                 print "Parsing failed at position "+location
