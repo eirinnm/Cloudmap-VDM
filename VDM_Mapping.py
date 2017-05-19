@@ -1,5 +1,6 @@
 #!/usr/bin/python
 
+
 import re
 import sys
 import optparse
@@ -9,9 +10,14 @@ import pprint
 from decimal import *
 #from rpy import *
 from rpy2.rpy_classic import *
+from rpy2 import robjects
 import traceback
 import time
 set_default_mode(0)
+#import numpy as np
+#import matplotlib as mpl
+#import matplotlib.pyplot as plt
+#import scipy.signal
 
 def main():
     starttime=time.time()
@@ -67,16 +73,6 @@ def main():
 def myround(x, base=10):
     return int(base * round(float(x)/base))
 
-def skip_headers(reader = None, i_file = None):
-    # count headers
-    comment = 0
-    while reader.next()[0].startswith('#'):
-        comment = comment + 1
-
-    # skip headers
-    i_file.seek(0)
-    for i in range(0, comment):
-        reader.next()
 
 def parse_breaks(break_file = None):
     if break_file == 'C.elegans':
@@ -202,6 +198,8 @@ def output_scatter_plots_by_location(location_plot_output, vcf_info, h_yaxis, ma
 
     except Exception as inst:
         print traceback.format_exc()
+        print location
+        print vcf_info[location]
         print "There was an error creating the location plot pdf."
 
 def get_hist_dict_by_chr(normalized_hist_per_xbase = None, chr = ''):
@@ -210,8 +208,12 @@ def get_hist_dict_by_chr(normalized_hist_per_xbase = None, chr = ''):
     for location in normalized_hist_per_xbase:
         chromosome = location.split(':')[0]
         if chromosome == chr:
-            position = int(location.split(':')[1])
-            hist_dict[position] = normalized_hist_per_xbase[location]
+            try:
+                position = int(location.split(':')[1])
+                hist_dict[position] = normalized_hist_per_xbase[location]
+            except ValueError:
+                print location
+                raise
 
     max_location = max(hist_dict.keys(), key=int)
     for i in range(1, max_location):
@@ -223,6 +225,11 @@ def get_hist_dict_by_chr(normalized_hist_per_xbase = None, chr = ''):
 def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr = "", x_label = "", divide_position = False, draw_secondary_grid_lines = False, loess_span=None, d_yaxis=None, h_yaxis=None, points_color="", loess_color="", breaks = None, standardize= None, max_breaks = 1, break_unit = 1):
     ratios = "c("
     positions = "c("
+    #global rx, ry
+    #positions, ratios = zip(*[(int(position)/1000000.0, chr_dict[position]) for position in chr_dict])
+    #rx = robjects.FloatVector(positions)
+    #ry = robjects.FloatVector(ratios)
+    #raise Exception
     for position in chr_dict:
         ratio = chr_dict[position]
         if divide_position:
@@ -240,7 +247,6 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
             positions = positions[0:len(positions) - 2] + ")"
     r("x <- " + positions)
     r("y <- " + ratios)
-
     hist_mb_values = "c("
     for position in sorted(hist_dict_mb):
         hist_mb_values = hist_mb_values + str(hist_dict_mb[position]) + ", "
@@ -267,6 +273,7 @@ def plot_data(chr_dict =  None, hist_dict_mb = None, hist_dict_5kb = None, chr =
     break_unit_str = str(Decimal(break_unit))
     half_break_unit_str = str(Decimal(break_unit) / Decimal(2))
     break_penta_unit_str = str(Decimal(break_unit) * Decimal(5))
+    #import pdb; pdb.set_trace()
     if (standardize=='true'):
             r("plot(x, y, ,cex=0.60, xlim=c(0," + max_break_str + "), main='LG " + chr + " (Variant Discovery Mapping)', xlab= '" + x_label + "', ylim = c(0, %f " %d_yaxis + "), ylab='Ratios of variant reads/total reads (at variant positions)', pch=10, col='"+ points_color +"')")
             r("lines(loess.smooth(x, y, span = %f "%loess_span + "), lwd=5, col='"+ loess_color +"')")
@@ -416,16 +423,30 @@ def get_one_ratio_snp_count_per_xbase(vcf_info = None, xbase = 1000000):
 
 
 def parse_vcf(sample_vcf = None, whitelist_chrs=None):
+    global row
     i_file = open(sample_vcf, 'rU')
     reader = csv.reader(i_file, delimiter = '\t', quoting = csv.QUOTE_NONE)
-
-    skip_headers(reader = reader, i_file = i_file)
     vcf_info = {}
     SNP_counter = 0
     Triallelic_counter = 0
     RO_counter = 0 #used for reporting the method used to parse the VCF
     AD_counter = 0
+    mutindex=None
+    sibindex=None
     for row in reader:
+        if row[0].startswith('##'):
+            continue
+        elif row[0].startswith('#'):
+            # find the sibling and mutant column
+            for i, col in enumerate(row):
+                if col.lower().startswith('mut'):
+                    mutindex=i
+                elif col.lower().startswith('sib'):
+                    sibindex=i
+            if not (mutindex or sibindex):
+                #single sample, just call the last column mutant
+                mutindex=i
+            continue
         chromosome = row[0].upper()
         chromosome = chromosome.replace("CHROMOSOME_","")
         chromosome = chromosome.replace("CHR","")
@@ -433,44 +454,42 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
         #chromosome = re.sub("chr", "", chromosome, flags = re.IGNORECASE)
         if (chromosome in whitelist_chrs) or (not whitelist_chrs):
             position = row[1]
-            #ref_allele = row[2]
-            #read_depth = row[3]
-            #read_bases = row[4]
-            ### Get allele frquency data
-            SNP_counter+=1
-            vcf_format_info = row[8].split(":")
-            vcf_allele_freq_data = row[9]
-            vcf_allele_data_bits = vcf_allele_freq_data.split(':')
-            ## do we have an RO field (Freebayes)? Use it and the AO field. Otherwise use the AD field from GATK.
-            if 'RO' in vcf_format_info:
-                RO_counter+=1
+            try:
+                #ref_allele = row[2]
+                #read_depth = row[3]
+                #read_bases = row[4]
+                ### Get allele frquency data
+                SNP_counter+=1
+                vcf_format_info = row[8].split(":")
+                if 'RO' in vcf_format_info:
+                    RO_counter+=1
+                if len(row)>11:
+                    raise ValueError("Too many columns: how many samples are there?")
                 try:
-                    ref_allele_count = int(vcf_allele_data_bits[vcf_format_info.index('RO')])
-                    alt_allele_count = int(vcf_allele_data_bits[vcf_format_info.index('AO')])
+                    genotype_data = row[mutindex].split(':')
+                    ro = int(genotype_data[vcf_format_info.index('RO')])
+                    ao = int(genotype_data[vcf_format_info.index('AO')])
+                    mut_ratio = 1.0 * ao / (ro+ao)
+                    mut_depth = int(genotype_data[vcf_format_info.index('DP')])
+                    if sibindex:
+                        genotype_data = row[mutindex].split(':')
+                        ro = int(genotype_data[vcf_format_info.index('RO')])
+                        ao = int(genotype_data[vcf_format_info.index('AO')])
+                        sib_ratio = 1.0 * ao / (ro+ao)
+                        sib_depth = int(genotype_data[vcf_format_info.index('DP')])
+                        
                 except ValueError:
                     Triallelic_counter+=1
                     continue #ignore rows that can't be converted, like tri-allelic
-            elif 'AD' in vcf_format_info:
-                AD_counter+=1
-                allele_count_field = vcf_allele_data_bits[vcf_format_info.index("AD")].split(',')
-                if len(allele_count_field)==2:
-                    ref_allele_count = int(allele_count_field[0])
-                    alt_allele_count = int(allele_count_field[1])
-                else:
-                    Triallelic_counter+=1
-                    continue
-
-            location = chromosome + ":" + position
-            read_depth = int(vcf_allele_data_bits[vcf_format_info.index("DP")])
-            if (ref_allele_count+alt_allele_count>0):
-                ratio = 1.0 * alt_allele_count / (ref_allele_count+alt_allele_count) ## python 2 float division
-            else:
-                print "Skipping zero-depth SNP at", location
-                continue
-
-            vcf_info[location] = (alt_allele_count, ref_allele_count, read_depth, ratio)
-    print SNP_counter, "SNPs processed and", Triallelic_counter, "triallelic SNPs ignored"
-    print RO_counter, "SNPs were parsed using RO/AO fields and", AD_counter, "were parsed using AD field."
+        
+                location = chromosome + ":" + position
+                vcf_info[location] = (ao, ro, mut_depth, mut_ratio)
+                #import pdb; pdb.set_trace()
+            except:
+                print "Parsing failed at position "+location
+                raise
+    print SNP_counter, "SNPs were parsed using RO/AO fields and", AD_counter, "were parsed using AD field."
+    print Triallelic_counter, "triallelic SNPs ignored"
     i_file.close()
     return vcf_info
 
