@@ -429,6 +429,7 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
     vcf_info = {}
     SNP_counter = 0
     Triallelic_counter = 0
+    Zerodepth_counter = 0
     RO_counter = 0 #used for reporting the method used to parse the VCF
     AD_counter = 0
     mutindex=None
@@ -480,11 +481,14 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
                     else:
                         sib_ratio = 0
                         sib_depth = 0
-                        
+
                 except ValueError:
                     Triallelic_counter+=1
                     continue #ignore rows that can't be converted, like tri-allelic
-        
+                except ZeroDivisionError:
+                    Zerodepth_counter+=1
+                    continue
+
                 location = chromosome + ":" + position
                 vcf_info[location] = (ao, ro, mut_depth, mut_ratio, sib_depth, sib_ratio)
                 #import pdb; pdb.set_trace()
@@ -492,7 +496,7 @@ def parse_vcf(sample_vcf = None, whitelist_chrs=None):
                 print "Parsing failed at position "+location
                 raise
     print SNP_counter, "SNPs were parsed using RO/AO fields and", AD_counter, "were parsed using AD field."
-    print Triallelic_counter, "triallelic SNPs ignored"
+    print Triallelic_counter, "triallelic SNPs and", Zerodepth_counter, "zero-depth SNPs ignored"
     i_file.close()
     return vcf_info
 
